@@ -22,7 +22,7 @@ class PgCodec(user: String, password: Option[String], database: String) extends 
         }
       }
 
-      override def prepareServiceFactory(underlying: ServiceFactory[PgRequest, PgResponse]) = {
+      override def prepareConnFactory(underlying: ServiceFactory[PgRequest, PgResponse]) = {
         val errorHandling = new HandleErrorsProxy(underlying)
         new AuthenticationProxy(errorHandling, user, password, database)
       }
