@@ -143,18 +143,14 @@ class Row(val fields: IndexedSeq[String], val vals: IndexedSeq[Value[Any]]) {
 
   private[this] val indexMap = fields.zipWithIndex.toMap
 
-  def getOption[A](name: String)(implicit mf: Manifest[A]): Option[A] = {
-    indexMap.get(name).map(vals(_)) match {
-      case Some(Value(x)) => Some(x.asInstanceOf[A])
-      case _ => None
-    }
+  def getOption[A](name: String): Option[A] = indexMap.get(name).map(vals(_)) match {
+    case Some(Value(x)) => Some(x.asInstanceOf[A])
+    case _ => None
   }
 
-  def get[A](name: String)(implicit mf:Manifest[A]):A = {
-    getOption[A](name) match {
-      case Some(x) => x
-      case _ => throw new IllegalStateException("Expected type " + mf.toString)
-    }
+  def get[A](name: String)(implicit mf: Manifest[A]): A = getOption(name) match {
+    case Some(x) => x
+    case _ => throw new IllegalStateException("Expected type " + mf.toString)
   }
 
   def get(index: Int): Value[Any] = vals(index)
