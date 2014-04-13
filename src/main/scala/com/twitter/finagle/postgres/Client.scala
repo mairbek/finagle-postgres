@@ -148,7 +148,7 @@ class Row(val fields: IndexedSeq[String], val vals: IndexedSeq[Value[Any]]) {
     case _ => None
   }
 
-  def get[A](name: String)(implicit mf: Manifest[A]): A = getOption(name) match {
+  def get[A](name: String)(implicit mf: Manifest[A]): A = getOption[A](name) match {
     case Some(x) => x
     case _ => throw new IllegalStateException("Expected type " + mf.toString)
   }
