@@ -1,8 +1,10 @@
 package com.twitter.finagle.postgres.protocol
 
 import org.jboss.netty.buffer.{ChannelBuffer, ChannelBuffers}
+import scala.util.parsing.combinator.RegexParsers
 
 import java.sql.Timestamp
+import com.twitter.logging.Logger
 
 object Type {
   val BOOL = 16
@@ -51,8 +53,6 @@ object Type {
   val RECORD = 2249
   val VOID = 2278
   val UUID = 2950
-  val ENUM = 16448
-
 }
 
 trait ValueParser {
@@ -88,8 +88,9 @@ trait ValueParser {
 
   def parseTimestampTZ(b: ChannelBuffer): Value[Timestamp]
 
-  def parseEnum(b: ChannelBuffer): Value[String]
+  def parseHStore(b: ChannelBuffer): Value[Map[String, String]]
 
+  def parseUnknown(b: ChannelBuffer): Value[String]
 }
 
 object StringValueParser extends ValueParser {
@@ -123,7 +124,16 @@ object StringValueParser extends ValueParser {
 
   def parseTimestampTZ(b: ChannelBuffer) = parseTimestamp(b)
 
-  def parseEnum(b: ChannelBuffer) = parseStr(b)
+  def parseHStore(b: ChannelBuffer) = {
+    val data = b.toString(Charsets.Utf8)
+
+    HStoreStringParser(data) match {
+      case Some(map) => Value[Map[String, String]](map)
+      case _ => null
+    }
+  }
+
+  def parseUnknown(b: ChannelBuffer) = parseStr(b)
 
   private[this] def parseInt(b: ChannelBuffer) = Value[Int](b.toString(Charsets.Utf8).toInt)
 
@@ -133,7 +143,9 @@ object StringValueParser extends ValueParser {
 
 object ValueParser {
 
-  def parserOf(format: Int, dataType: Int): ChannelBuffer => Value[Any] = {
+  private[this] val logger = Logger("value parser")
+
+  def parserOf(format: Int, dataType: Int, customTypes:Map[String, String]): ChannelBuffer => Value[Any] = {
     val valueParser: ValueParser = format match {
       case 0 => StringValueParser
       case _ => throw new UnsupportedOperationException("TODO Add support for binary format")
@@ -157,8 +169,17 @@ object ValueParser {
         case VAR_CHAR => valueParser.parseVarChar
         case TIMESTAMP => valueParser.parseTimestamp
         case TIMESTAMP_TZ => valueParser.parseTimestampTZ
-        case ENUM => valueParser.parseEnum
-        case _ => throw Errors.client("Data type '" + dataType + "' is not supported")
+        case _ => {
+          customTypes.get(dataType.toString) match {
+            case Some("hstore") => {
+              valueParser.parseHStore
+            }
+            case _ => {
+              logger.ifDebug("Unknown data type " + dataType + ", parsing as a unknown")
+              valueParser.parseUnknown
+            }
+          }
+        }
       }
     r
 
@@ -171,8 +192,34 @@ object StringValueEncoder {
     if (value == null || value == None) {
       result.writeInt(-1)
     } else {
-      result.writeBytes(value.toString.getBytes(Charsets.Utf8))
+      result.writeBytes(convertValue(value).toString.getBytes(Charsets.Utf8))
     }
     result
+  }
+
+  def convertValue[A](value:A)(implicit mf:Manifest[A]):Any = {
+    value match {
+      case m:collection.Map[_, _] => { // this is an hstore, so turn it into one
+        def escape(s:String):String = {
+          s.replace("\\", "\\\\").replace("\"", "\\\"")
+        }
+        m.map { case (k:String, v:String) =>
+          """"%s" => "%s"""".format(escape(k), escape(v))
+        }.mkString(",")
+      }
+      case _ => value
+    }
+  }
+}
+
+object HStoreStringParser extends RegexParsers {
+  def term:Parser[String] = "\"" ~ """([^"\\]*(\\.[^"\\]*)*)""".r ~ "\"" ^^ { case o~value~c => value.replace("\\\"", "\"").replace("\\\\", "\\") }
+  def item:Parser[(String, String)] = term ~ "=>" ~ term ^^ { case key~arrow~value => (key, value) }
+
+  def items:Parser[Map[String, String]] = repsep(item, ", ") ^^ { l => l.toMap }
+
+  def apply(input:String):Option[Map[String, String]] = parseAll(items, input) match {
+    case Success(result, _) => Some(result)
+    case failure:NoSuccess => None
   }
 }
