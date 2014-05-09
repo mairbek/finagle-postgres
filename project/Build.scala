@@ -19,7 +19,7 @@ object FinaglePostgres extends Build {
   lazy val publishSettings = Seq(
     publishMavenStyle := true,
     publishArtifact := true,
-    publishTo := Some(Resolver.file("localDirectory", file("/static/repo"))),
+    publishTo := Some(Resolver.file("localDirectory", file(Path.userHome.absolutePath + "/repo"))),
     licenses := Seq("Apache 2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
     homepage := Some(url("https://github.com/mairbek/finagle-postgres")),
     pomExtra := (
